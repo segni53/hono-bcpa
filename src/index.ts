@@ -1,106 +1,91 @@
 import { Hono } from 'hono'
 
-const app = new Hono()
+type PublicUser = Omit<User, 'password'>
 
-app.get('/', (c) => {
-  return c.text('Hello Hono!')
-})
-import express, { Request, Response } from "express";
-
-const app = express();
-app.use(express.json());
-
-const PORT = 3000;
-
-// User type
 interface User {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
+  id: string
+  name: string
+  email: string
+  password: string
 }
 
-// In-memory store
-let users: User[] = [];
+interface AuthBody {
+  name?: string
+  email?: string
+  password?: string
+}
 
-// Generate unique ID
-const generateId = (): string => Date.now().toString();
+const app = new Hono()
+const users: User[] = []
 
+const generateId = (): string => crypto.randomUUID()
 
-// 1. Get All Users
-app.get("/users", (req: Request, res: Response) => {
-  const usersWithoutPasswords = users.map(({ password, ...rest }) => rest);
-  res.json(usersWithoutPasswords);
-});
+const stripPassword = ({ password, ...user }: User): PublicUser => user
 
+app.get('/', (c) => c.text('Hello Hono!'))
 
-// 2. Get User by ID
-app.get("/users/:id", (req: Request, res: Response) => {
-  const user = users.find(u => u.id === req.params.id);
+app.get('/users', (c) => {
+  return c.json(users.map(stripPassword))
+})
+
+app.get('/users/:id', (c) => {
+  const user = users.find((entry) => entry.id === c.req.param('id'))
 
   if (!user) {
-    return res.status(404).json({ message: "User not found" });
+    return c.json({ message: 'User not found' }, 404)
   }
 
-  const { password, ...userWithoutPassword } = user;
-  res.json(userWithoutPassword);
-});
+  return c.json(stripPassword(user))
+})
 
-
-// 3. Signup
-app.post("/signup", (req: Request, res: Response) => {
-  const { name, email, password } = req.body;
+app.post('/signup', async (c) => {
+  const { name, email, password } = (await c.req.json()) as AuthBody
 
   if (!name || !email || !password) {
-    return res.status(400).json({ message: "All fields are required" });
+    return c.json({ message: 'All fields are required' }, 400)
   }
 
-  const existingUser = users.find(u => u.email === email);
+  const existingUser = users.find((entry) => entry.email === email)
   if (existingUser) {
-    return res.status(400).json({ message: "Email already exists" });
+    return c.json({ message: 'Email already exists' }, 400)
   }
 
   const newUser: User = {
     id: generateId(),
     name,
     email,
-    password
-  };
+    password,
+  }
 
-  users.push(newUser);
+  users.push(newUser)
 
-  const { password: _, ...userWithoutPassword } = newUser;
+  return c.json(stripPassword(newUser), 201)
+})
 
-  res.status(201).json(userWithoutPassword);
-});
+app.post('/signin', async (c) => {
+  const { email, password } = (await c.req.json()) as AuthBody
 
+  if (!email || !password) {
+    return c.json({ message: 'Email and password are required' }, 400)
+  }
 
-// 4. Signin
-app.post("/signin", (req: Request, res: Response) => {
-  const { email, password } = req.body;
-
-  const user = users.find(u => u.email === email);
+  const user = users.find((entry) => entry.email === email)
 
   if (!user) {
-    return res.status(404).json({ message: "User not found" });
+    return c.json({ message: 'User not found' }, 404)
   }
 
   if (user.password !== password) {
-    return res.status(401).json({ message: "Invalid credentials" });
+    return c.json({ message: 'Invalid credentials' }, 401)
   }
 
-  const { password: _, ...userWithoutPassword } = user;
+  return c.json({
+    message: 'Login successful',
+    user: stripPassword(user),
+  })
+})
 
-  res.json({
-    message: "Login successful",
-    user: userWithoutPassword
-  });
-});
-
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
-
-export default app
+export default {
+  port: 3000,
+  fetch: app.fetch,
+}
